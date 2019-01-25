@@ -6,7 +6,8 @@ libraryDependencies ++= Seq(
   lagomScaladslApi         % "provided",
   lagomScaladslPersistence % "provided",
   lagomScaladslCluster     % "provided",
-  "org.apache.commons"     % "commons-collections4" % "4.0"
+  "org.apache.commons"     % "commons-collections4" % "4.0",
+  "org.scalatest"          %% "scalatest" % "3.0.5" % Test
 )
 
 libraryDependencies ++= Seq(compilerPlugin("com.github.ghik" %% "silencer-plugin" % "1.3.0"), "com.github.ghik" %% "silencer-lib" % "1.3.0" % Provided)

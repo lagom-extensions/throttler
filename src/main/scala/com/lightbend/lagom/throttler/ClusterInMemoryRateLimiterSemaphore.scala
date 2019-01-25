@@ -24,7 +24,9 @@ private[throttler] class ClusterInMemoryRateLimiterSemaphore(duration: FiniteDur
       confirmedUsedPermits.put(currentTimeMillis, usedPermits)
       consumersInChunk.put(sender().path, null)
       reservedPermits.remove(sender().path)
-      sender() ! ReservedPermitsReply(makeReservationPermits)
+      val consumerReservations = makeReservationPermits
+      reservedPermits.put(sender().path, consumerReservations)
+      sender() ! ReservedPermitsReply(consumerReservations)
   }
 
   private def makeReservationPermits: Seq[ReservedPermit] = {

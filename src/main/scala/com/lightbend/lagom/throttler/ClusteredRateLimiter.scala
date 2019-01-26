@@ -25,7 +25,7 @@ class ClusteredRateLimiter(
   implicit private val timeout: Timeout = Timeout(syncDuration / 2)
   private lazy val semaphoreCoordinator: ActorRef = ClusterInMemoryRateLimiterSemaphore.clusterRateLimiterActorProxy(rateLimiterName)
 
-  private val reservedPermits: ListBuffer[ReservedPermit] = ListBuffer.empty
+  private var reservedPermits: ReservedPermits = _
   private val usedPermits: ListBuffer[UsedPermit] = ListBuffer.empty
 
   actorSystem.scheduler.schedule(syncDuration, syncDuration) {
@@ -34,9 +34,9 @@ class ClusteredRateLimiter(
       def mayBePoll(): Unit =
         if (!queue.isEmpty) {
           val permitUsed = getPermit match {
-            case Some((currentTime, _)) =>
+            case Some(usedPermit) =>
               Option(queue.poll()).exists { fun =>
-                usedPermits += UsedPermit(currentTime)
+                usedPermits += usedPermit
                 fun.apply()
                 true
               }
@@ -49,24 +49,25 @@ class ClusteredRateLimiter(
     }
   }
 
-  private def getPermit: Option[(Long, ReservedPermit)] = {
+  private def getPermit: Option[UsedPermit] = {
     this synchronized {
       val currentTime = System.currentTimeMillis()
-      val res = reservedPermits
-        .find(_.validTillMills > currentTime)
-        .map((currentTime, _))
-      res.foreach(reservedPermits -= _._2)
-      res
+      Option(reservedPermits) match {
+        case Some(permits) if (permits.permitsCount > 0) && (permits.validTillMills > currentTime) =>
+          reservedPermits = permits.copy(permitsCount = permits.permitsCount - 1)
+          Some(UsedPermit(currentTime))
+        case _ => None
+      }
     }
   }
 
   actorSystem.scheduler.schedule(FiniteDuration(1, TimeUnit.NANOSECONDS), syncDuration) {
     this synchronized {
-      reservedPermits.clear()
+      reservedPermits = null
       val used = usedPermits.toList
       usedPermits.clear()
       semaphoreCoordinator.ask(SyncPermitsCommand(used)).map {
-        case ReservedPermitsReply(permits) => reservedPermits ++= permits
+        case ReservedPermitsReply(permits) => reservedPermits == permits
       }
     }
   }
@@ -83,8 +84,8 @@ class ClusteredRateLimiter(
   def apply[T](f: => Future[T]): Future[T] =
     this synchronized {
       getPermit match {
-        case Some((currentTime, _)) =>
-          usedPermits += UsedPermit(currentTime)
+        case Some(usedPermit) =>
+          usedPermits += usedPermit
           f
         case None =>
           val res = Promise[T]()
@@ -94,9 +95,9 @@ class ClusteredRateLimiter(
     }
 }
 
-private[lagom] case class ReservedPermit(validTillMills: Long)
-object ReservedPermit {
-  implicit val format: Format[ReservedPermit] = Json.format
+private[lagom] case class ReservedPermits(validTillMills: Long, permitsCount: Int)
+object ReservedPermits {
+  implicit val format: Format[ReservedPermits] = Json.format
 }
 private[lagom] case class UsedPermit(usedTimeMills: Long)
 object UsedPermit {

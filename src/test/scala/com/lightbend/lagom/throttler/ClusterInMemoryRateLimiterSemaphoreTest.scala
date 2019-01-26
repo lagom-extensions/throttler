@@ -20,7 +20,7 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test"
         ClusterInMemoryRateLimiterSemaphore.props(duration = FiniteDuration(1, MINUTES), maxInvocation = 0, syncsPerDuration = 60)
       )
       semaphore ! SyncPermitsCommand(usedPermits = Seq.empty)
-      expectMsg(ReservedPermitsReply(Seq.empty))
+      expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 0 => () }
     }
 
     "reply with all permits for first requested" in {
@@ -28,7 +28,7 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test"
         ClusterInMemoryRateLimiterSemaphore.props(duration = FiniteDuration(1, MINUTES), maxInvocation = 10, syncsPerDuration = 60)
       )
       semaphore ! SyncPermitsCommand(usedPermits = Seq.empty)
-      expectMsgPF() { case ReservedPermitsReply(permits) if permits.size == 10 => () }
+      expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 10 => () }
     }
 
     "reply with left permits after sync with used" in {
@@ -42,8 +42,8 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test"
           UsedPermit(System.currentTimeMillis()),
         )
       )
-      expectMsgPF() { case ReservedPermitsReply(permits) if permits.size == 10 => () }
-      expectMsgPF() { case ReservedPermitsReply(permits) if permits.size == 8  => () }
+      expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 10 => () }
+      expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 8 => () }
     }
 
     "correctly do window sliding and not track permits that out of slide" in {
@@ -59,8 +59,8 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test"
           UsedPermit(System.currentTimeMillis() - FiniteDuration(1, MINUTES).toMillis - 3)
         )
       )
-      expectMsgPF() { case ReservedPermitsReply(permits) if permits.size == 10 => () }
-      expectMsgPF() { case ReservedPermitsReply(permits) if permits.size == 9  => () }
+      expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 10 => () }
+      expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 9 => () }
     }
 
     "split permits to multiple consumers" in {
@@ -81,10 +81,15 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test"
 
       // sync on first, release all previous and should get as fair divide permits
       semaphore.tell(SyncPermitsCommand(usedPermits = Seq.empty), consumer1.ref)
-      consumer1.expectMsgPF() { case ReservedPermitsReply(permits) if permits.size == 9 => () }
-      consumer2.expectMsg(ReservedPermitsReply(Seq.empty))
-      consumer3.expectMsg(ReservedPermitsReply(Seq.empty))
-      consumer1.expectMsgPF() { case ReservedPermitsReply(permits) if permits.size == 3 => () }
+      semaphore.tell(SyncPermitsCommand(usedPermits = Seq.empty), consumer2.ref)
+      semaphore.tell(SyncPermitsCommand(usedPermits = Seq.empty), consumer3.ref)
+
+      consumer1.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 9 => () }
+      consumer2.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 0 => () }
+      consumer3.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 0 => () }
+      consumer1.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 3 => () }
+      consumer2.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 3 => () }
+      consumer3.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 3 => () }
     }
 
   }

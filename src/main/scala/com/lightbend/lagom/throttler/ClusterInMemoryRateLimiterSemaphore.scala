@@ -17,7 +17,7 @@ private[throttler] class ClusterInMemoryRateLimiterSemaphore(duration: FiniteDur
   private val windowSlideDurationMills = duration.toMillis
   private val consumersInChunk = new PassiveExpiringMap(new ConstantTimeToLiveExpirationPolicy[ActorPath, Null](oneSyncInterval))
   private val confirmedUsedPermits = new PassiveExpiringMap(new ConstantTimeToLiveExpirationPolicy[Long, Seq[UsedPermit]](windowSlideDurationMills))
-  private val reservedPermits = new PassiveExpiringMap(new ConstantTimeToLiveExpirationPolicy[ActorPath, Seq[ReservedPermit]](windowSlideDurationMills))
+  private val reservedPermits = new PassiveExpiringMap(new ConstantTimeToLiveExpirationPolicy[ActorPath, ReservedPermits](windowSlideDurationMills))
 
   override def receive: Receive = {
     case SyncPermitsCommand(usedPermits) =>
@@ -29,19 +29,22 @@ private[throttler] class ClusterInMemoryRateLimiterSemaphore(duration: FiniteDur
       sender() ! ReservedPermitsReply(consumerReservations)
   }
 
-  private def makeReservationPermits: Seq[ReservedPermit] = {
+  private def makeReservationPermits: ReservedPermits = {
     val usedPermits = calcWindowCountingUsedPermits
-    val reservedPermits = calcReservedPermits
-    val totalAllowedPermits = maxInvocation - usedPermits - reservedPermits
+    val reservedPermitsCount = calcReservedPermits
+    val totalAllowedPermits = maxInvocation - usedPermits - reservedPermitsCount
     val approxConsumers = {
       val size = consumersInChunk.size()
       if (size == 0) 1 else size
     }
-    val consumerAllowedPermits = totalAllowedPermits / approxConsumers
-    if (consumerAllowedPermits > 0) {
-      val validTill = oneSyncInterval + currentTimeMillis
-      for (_ <- 1L to consumerAllowedPermits) yield ReservedPermit(validTill)
-    } else Seq.empty
+    val consumersThatReservePermitsInChunk = reservedPermits.asScala.values.count(_.permitsCount > 0)
+    val permitsDivider = {
+      val res = approxConsumers - consumersThatReservePermitsInChunk
+      if (res <= 0) 1 else res
+    }
+    val consumerAllowedPermits = totalAllowedPermits / permitsDivider
+    val validTill = oneSyncInterval + currentTimeMillis
+    ReservedPermits(validTill, consumerAllowedPermits.intValue())
   }
 
   private def calcWindowCountingUsedPermits: Long = {
@@ -54,7 +57,7 @@ private[throttler] class ClusterInMemoryRateLimiterSemaphore(duration: FiniteDur
     used
   }
 
-  private def calcReservedPermits: Long = reservedPermits.asScala.mapValues(_.size.toLong).values.sum
+  private def calcReservedPermits: Long = reservedPermits.asScala.mapValues(_.permitsCount.toLong).values.sum
 
 }
 
@@ -63,7 +66,7 @@ private[lagom] object ClusterInMemoryRateLimiterSemaphore {
     Props(new ClusterInMemoryRateLimiterSemaphore(duration, maxInvocation, syncsPerDuration))
   // lagom don't comes with akka typed now
   case class SyncPermitsCommand(usedPermits: Seq[UsedPermit])
-  case class ReservedPermitsReply(permits: Seq[ReservedPermit])
+  case class ReservedPermitsReply(permits: ReservedPermits)
 
   private[lagom] def clusterRateLimiterActorProxy(clusterSingletonManagerName: String)(implicit actorSystem: ActorSystem): ActorRef =
     actorSystem.actorOf(

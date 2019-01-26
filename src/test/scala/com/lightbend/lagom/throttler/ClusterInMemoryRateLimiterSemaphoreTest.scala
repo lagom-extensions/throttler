@@ -1,14 +1,12 @@
 package com.lightbend.lagom.throttler
-import java.util.concurrent.TimeUnit.MINUTES
-
 import akka.actor.ActorSystem
 import akka.testkit.{ImplicitSender, TestKit, TestProbe}
 import com.lightbend.lagom.throttler.ClusterInMemoryRateLimiterSemaphore.{ReservedPermitsReply, SyncPermitsCommand}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration._
 
-class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test")) with WordSpecLike with ImplicitSender with Matchers with BeforeAndAfterAll {
+class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test-actor-system")) with WordSpecLike with ImplicitSender with Matchers with BeforeAndAfterAll {
   override def afterAll: Unit = {
     TestKit.shutdownActorSystem(system)
   }
@@ -17,7 +15,7 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test"
 
     "reply no permits when 0 max allowed" in {
       val semaphore = system.actorOf(
-        ClusterInMemoryRateLimiterSemaphore.props(duration = FiniteDuration(1, MINUTES), maxInvocation = 0, syncsPerDuration = 60)
+        ClusterInMemoryRateLimiterSemaphore.props(duration = 1.minute, maxInvocation = 0, syncsPerDuration = 60)
       )
       semaphore ! SyncPermitsCommand(usedPermits = Seq.empty)
       expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 0 => () }
@@ -25,7 +23,7 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test"
 
     "reply with all permits for first requested" in {
       val semaphore = system.actorOf(
-        ClusterInMemoryRateLimiterSemaphore.props(duration = FiniteDuration(1, MINUTES), maxInvocation = 10, syncsPerDuration = 60)
+        ClusterInMemoryRateLimiterSemaphore.props(duration = 1.minute, maxInvocation = 10, syncsPerDuration = 60)
       )
       semaphore ! SyncPermitsCommand(usedPermits = Seq.empty)
       expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 10 => () }
@@ -33,7 +31,7 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test"
 
     "reply with left permits after sync with used" in {
       val semaphore = system.actorOf(
-        ClusterInMemoryRateLimiterSemaphore.props(duration = FiniteDuration(1, MINUTES), maxInvocation = 10, syncsPerDuration = 60)
+        ClusterInMemoryRateLimiterSemaphore.props(duration = 1.minute, maxInvocation = 10, syncsPerDuration = 60)
       )
       semaphore ! SyncPermitsCommand(usedPermits = Seq.empty)
       semaphore ! SyncPermitsCommand(
@@ -48,15 +46,15 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test"
 
     "correctly do window sliding and not track permits that out of slide" in {
       val semaphore = system.actorOf(
-        ClusterInMemoryRateLimiterSemaphore.props(duration = FiniteDuration(1, MINUTES), maxInvocation = 10, syncsPerDuration = 60)
+        ClusterInMemoryRateLimiterSemaphore.props(duration = 1.minute, maxInvocation = 10, syncsPerDuration = 60)
       )
       semaphore ! SyncPermitsCommand(usedPermits = Seq.empty)
       semaphore ! SyncPermitsCommand(
         usedPermits = Seq(
           UsedPermit(System.currentTimeMillis()),
-          UsedPermit(System.currentTimeMillis() - FiniteDuration(1, MINUTES).toMillis - 1),
-          UsedPermit(System.currentTimeMillis() - FiniteDuration(1, MINUTES).toMillis - 2),
-          UsedPermit(System.currentTimeMillis() - FiniteDuration(1, MINUTES).toMillis - 3)
+          UsedPermit(System.currentTimeMillis() - 1.minute.toMillis - 1),
+          UsedPermit(System.currentTimeMillis() - 1.minute.toMillis - 2),
+          UsedPermit(System.currentTimeMillis() - 1.minute.toMillis - 3)
         )
       )
       expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 10 => () }
@@ -65,7 +63,7 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test"
 
     "split permits to multiple consumers" in {
       val semaphore = system.actorOf(
-        ClusterInMemoryRateLimiterSemaphore.props(duration = FiniteDuration(1, MINUTES), maxInvocation = 9, syncsPerDuration = 60)
+        ClusterInMemoryRateLimiterSemaphore.props(duration = 1.minute, maxInvocation = 9, syncsPerDuration = 60)
       )
 
       val consumer1 = TestProbe()

@@ -1,6 +1,7 @@
 package com.lightbend.lagom.throttler
 
-import java.util.concurrent.{ConcurrentLinkedQueue, TimeUnit}
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicReference
 
 import akka.actor.{ActorRef, ActorSystem, PoisonPill}
 import akka.cluster.singleton.{ClusterSingletonManager, ClusterSingletonManagerSettings}
@@ -18,14 +19,14 @@ class ClusteredRateLimiter(
     rateLimiterName: String,
     duration: FiniteDuration,
     maxInvocation: Int,
-    syncsPerDuration: Int = 100
+    syncsPerDuration: Int
 )(implicit ec: ExecutionContext, actorSystem: ActorSystem) {
   private val queue = new ConcurrentLinkedQueue[() => Any]()
   private val syncDuration = duration / syncsPerDuration.toLong
   implicit private val timeout: Timeout = Timeout(syncDuration / 2)
   private lazy val semaphoreCoordinator: ActorRef = ClusterInMemoryRateLimiterSemaphore.clusterRateLimiterActorProxy(rateLimiterName)
 
-  private var reservedPermits: ReservedPermits = _
+  private val reservedPermits: AtomicReference[ReservedPermits] = new AtomicReference[ReservedPermits]()
   private val usedPermits: ListBuffer[UsedPermit] = ListBuffer.empty
 
   actorSystem.scheduler.schedule(syncDuration, syncDuration) {
@@ -52,22 +53,22 @@ class ClusteredRateLimiter(
   private def getPermit: Option[UsedPermit] = {
     this synchronized {
       val currentTime = System.currentTimeMillis()
-      Option(reservedPermits) match {
+      Option(reservedPermits.get) match {
         case Some(permits) if (permits.permitsCount > 0) && (permits.validTillMills > currentTime) =>
-          reservedPermits = permits.copy(permitsCount = permits.permitsCount - 1)
+          reservedPermits.set(permits.copy(permitsCount = permits.permitsCount - 1))
           Some(UsedPermit(currentTime))
         case _ => None
       }
     }
   }
 
-  actorSystem.scheduler.schedule(FiniteDuration(1, TimeUnit.NANOSECONDS), syncDuration) {
+  actorSystem.scheduler.schedule(1.nano, syncDuration) {
     this synchronized {
-      reservedPermits = null
+      reservedPermits.set(null)
       val used = usedPermits.toList
       usedPermits.clear()
       semaphoreCoordinator.ask(SyncPermitsCommand(used)).map {
-        case ReservedPermitsReply(permits) => reservedPermits == permits
+        case ReservedPermitsReply(permits) => reservedPermits.set(permits)
       }
     }
   }

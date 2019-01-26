@@ -61,9 +61,32 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test-
       expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 9 => () }
     }
 
-    "split permits to multiple consumers" in {
+    "split permits to multiple consumers with round available permits down test 1" in {
       val semaphore = system.actorOf(
-        ClusterInMemoryRateLimiterSemaphore.props(duration = 1.minute, maxInvocation = 9, syncsPerDuration = 60)
+        ClusterInMemoryRateLimiterSemaphore.props(duration = 1.minute, maxInvocation = 3, syncsPerDuration = 60)
+      )
+
+      val consumer1 = TestProbe()
+      val consumer2 = TestProbe()
+
+      // first will get all
+      semaphore.tell(SyncPermitsCommand(usedPermits = Seq.empty), consumer1.ref)
+      // get none
+      semaphore.tell(SyncPermitsCommand(usedPermits = Seq.empty), consumer2.ref)
+
+      // sync on first, release all previous and should get as fair divide permits
+      semaphore.tell(SyncPermitsCommand(usedPermits = Seq.empty), consumer1.ref)
+      semaphore.tell(SyncPermitsCommand(usedPermits = Seq.empty), consumer2.ref)
+
+      consumer1.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 3 => () }
+      consumer2.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 0 => () }
+      consumer1.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 1 => () }
+      consumer2.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 2 => () }
+    }
+
+    "split permits to multiple consumers with round available permits down test 2" in {
+      val semaphore = system.actorOf(
+        ClusterInMemoryRateLimiterSemaphore.props(duration = 1.minute, maxInvocation = 10, syncsPerDuration = 60)
       )
 
       val consumer1 = TestProbe()
@@ -82,12 +105,12 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test-
       semaphore.tell(SyncPermitsCommand(usedPermits = Seq.empty), consumer2.ref)
       semaphore.tell(SyncPermitsCommand(usedPermits = Seq.empty), consumer3.ref)
 
-      consumer1.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 9 => () }
+      consumer1.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 10 => () }
       consumer2.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 0 => () }
       consumer3.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 0 => () }
       consumer1.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 3 => () }
       consumer2.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 3 => () }
-      consumer3.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 3 => () }
+      consumer3.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 4 => () }
     }
 
   }

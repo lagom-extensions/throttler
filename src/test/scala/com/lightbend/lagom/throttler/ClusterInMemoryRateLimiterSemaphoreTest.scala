@@ -1,12 +1,19 @@
 package com.lightbend.lagom.throttler
 import akka.actor.ActorSystem
+import akka.actor.setup.ActorSystemSetup
 import akka.testkit.{ImplicitSender, TestKit, TestProbe}
+import com.lightbend.lagom.scaladsl.playjson.JsonSerializerRegistry
 import com.lightbend.lagom.throttler.ClusterInMemoryRateLimiterSemaphore.{ReservedPermitsReply, SyncPermitsCommand}
 import org.scalatest.{BeforeAndAfterAll, Matchers, WordSpecLike}
 
 import scala.concurrent.duration._
 
-class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test-actor-system")) with WordSpecLike with ImplicitSender with Matchers with BeforeAndAfterAll {
+class ClusterInMemoryRateLimiterSemaphoreTest
+    extends TestKit(ActorSystem("test-actor-system", ActorSystemSetup(JsonSerializerRegistry.serializationSetupFor(ClusteredRateLimiter))))
+    with WordSpecLike
+    with ImplicitSender
+    with Matchers
+    with BeforeAndAfterAll {
   override def afterAll: Unit = {
     TestKit.shutdownActorSystem(system)
   }
@@ -41,7 +48,7 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test-
         )
       )
       expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 10 => () }
-      expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 8 => () }
+      expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 8  => () }
     }
 
     "correctly do window sliding and not track permits that out of slide" in {
@@ -58,7 +65,7 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test-
         )
       )
       expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 10 => () }
-      expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 9 => () }
+      expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 9  => () }
     }
 
     "split permits to multiple consumers with round available permits down test 1" in {
@@ -106,11 +113,11 @@ class ClusterInMemoryRateLimiterSemaphoreTest extends TestKit(ActorSystem("test-
       semaphore.tell(SyncPermitsCommand(usedPermits = Seq.empty), consumer3.ref)
 
       consumer1.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 10 => () }
-      consumer2.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 0 => () }
-      consumer3.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 0 => () }
-      consumer1.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 3 => () }
-      consumer2.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 3 => () }
-      consumer3.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 4 => () }
+      consumer2.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 0  => () }
+      consumer3.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 0  => () }
+      consumer1.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 3  => () }
+      consumer2.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 3  => () }
+      consumer3.expectMsgPF() { case ReservedPermitsReply(permits) if permits.permitsCount == 4  => () }
     }
 
   }

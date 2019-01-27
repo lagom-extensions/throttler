@@ -3,17 +3,24 @@ import java.lang.System.currentTimeMillis
 
 import akka.Done
 import akka.actor.ActorSystem
+import akka.actor.setup.ActorSystemSetup
+import akka.testkit.TestKit
+import com.lightbend.lagom.scaladsl.playjson.JsonSerializerRegistry
 import org.scalatest._
 
+import scala.annotation.tailrec
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.{FiniteDuration, _}
 import scala.concurrent.{Future, Promise}
 
-class ClusteredRateLimiterTest extends AsyncWordSpec with Matchers with BeforeAndAfterAll {
-  implicit private val system = ActorSystem("test-actor-system")
+class ClusteredRateLimiterTest
+    extends TestKit(ActorSystem("test-actor-system", ActorSystemSetup(JsonSerializerRegistry.serializationSetupFor(ClusteredRateLimiter))))
+    with AsyncWordSpecLike
+    with Matchers
+    with BeforeAndAfterAll {
 
   override def afterAll: Unit = {
-    system.terminate()
+    TestKit.shutdownActorSystem(system)
   }
 
   "An cluster rate limiter" should {
@@ -65,15 +72,17 @@ class ClusteredRateLimiterTest extends AsyncWordSpec with Matchers with BeforeAn
   private class TestService() {
     def slideInPermitLimits(duration: FiniteDuration, maxInDuration: Int): Boolean = {
       val durationMills = duration.toMillis
+      @tailrec
       def isDurationSlideValid(eventTimes: Seq[Long], chunkEndMills: Long): Boolean = {
         eventTimes match {
           case Nil => true
           case Seq(x, xs @ _*) =>
             val slideValid = maxInDuration >= eventTimes.count(_ < chunkEndMills)
-            slideValid && isDurationSlideValid(xs, x + durationMills)
+            if (!slideValid) false else isDurationSlideValid(xs, x + durationMills)
         }
       }
-      isDurationSlideValid(queryHistory, queryHistory.headOption.map(_ + durationMills).getOrElse(currentTimeMillis()))
+      val sorted = queryHistory.sorted
+      isDurationSlideValid(sorted, sorted.headOption.map(_ + durationMills).getOrElse(currentTimeMillis()))
     }
 
     val queryHistory = ListBuffer.empty[Long]

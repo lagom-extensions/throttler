@@ -25,3 +25,5 @@ publishTo := Some(
   if (isSnapshot.value) Opts.resolver.sonatypeSnapshots
   else Opts.resolver.sonatypeStaging
 )
+
+parallelExecution in ThisBuild := false

@@ -32,7 +32,7 @@ private[throttler] class ClusterInMemoryRateLimiterSemaphore(duration: FiniteDur
   private def makeReservationPermits: ReservedPermits = {
     val usedPermits = calcWindowCountingUsedPermits
     val reservedPermitsCount = calcReservedPermits
-    val totalAllowedPermits = maxInvocation - usedPermits - reservedPermitsCount
+    val totalAllowedPermits = Math.max(0, maxInvocation - usedPermits - reservedPermitsCount)
     val approxConsumers = {
       val size = consumersInChunk.size()
       if (size == 0) 1 else size

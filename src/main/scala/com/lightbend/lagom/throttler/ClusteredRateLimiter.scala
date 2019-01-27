@@ -3,10 +3,10 @@ package com.lightbend.lagom.throttler
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicReference
 
-import akka.actor.{ActorRef, ActorSystem, PoisonPill}
+import akka.actor.{Actor, ActorRef, ActorSystem, PoisonPill, Props}
 import akka.cluster.singleton.{ClusterSingletonManager, ClusterSingletonManagerSettings}
-import akka.pattern.ask
 import akka.util.Timeout
+import com.lightbend.lagom.scaladsl.playjson.{JsonSerializer, JsonSerializerRegistry}
 import com.lightbend.lagom.throttler.ClusterInMemoryRateLimiterSemaphore.{ReservedPermitsReply, SyncPermitsCommand}
 import play.api.libs.json.{Format, Json}
 
@@ -24,7 +24,7 @@ class ClusteredRateLimiter(
   private val queue = new ConcurrentLinkedQueue[() => Any]()
   private val syncDuration = duration / syncsPerDuration.toLong
   implicit private val timeout: Timeout = Timeout(syncDuration / 2)
-  private lazy val semaphoreCoordinator: ActorRef = ClusterInMemoryRateLimiterSemaphore.clusterRateLimiterActorProxy(rateLimiterName)
+  private val delegateSyncActor = actorSystem.actorOf(Props(new DelegateSyncActor()))
 
   private val reservedPermits: AtomicReference[ReservedPermits] = new AtomicReference[ReservedPermits]()
   private val usedPermits: ListBuffer[UsedPermit] = ListBuffer.empty
@@ -67,9 +67,7 @@ class ClusteredRateLimiter(
       reservedPermits.set(null)
       val used = usedPermits.toList
       usedPermits.clear()
-      semaphoreCoordinator.ask(SyncPermitsCommand(used)).map {
-        case ReservedPermitsReply(permits) => reservedPermits.set(permits)
-      }
+      delegateSyncActor ! SyncPermitsCommand(used)
     }
   }
 
@@ -94,13 +92,29 @@ class ClusteredRateLimiter(
           res.future
       }
     }
+
+  private class DelegateSyncActor extends Actor {
+    private lazy val semaphoreCoordinator: ActorRef = ClusterInMemoryRateLimiterSemaphore.clusterRateLimiterActorProxy(rateLimiterName)
+    override def receive: Receive = {
+      case cmd: SyncPermitsCommand       => semaphoreCoordinator ! cmd
+      case ReservedPermitsReply(permits) => reservedPermits.set(permits)
+    }
+  }
 }
 
 private[lagom] case class ReservedPermits(validTillMills: Long, permitsCount: Int)
-object ReservedPermits {
-  implicit val format: Format[ReservedPermits] = Json.format
-}
 private[lagom] case class UsedPermit(usedTimeMills: Long)
-object UsedPermit {
-  implicit val format: Format[UsedPermit] = Json.format
+
+object ClusteredRateLimiter extends JsonSerializerRegistry {
+  implicit val f1: Format[ReservedPermits] = Json.format
+  implicit val f2: Format[UsedPermit] = Json.format
+  implicit val f3: Format[SyncPermitsCommand] = Json.format
+  implicit val f4: Format[ReservedPermitsReply] = Json.format
+
+  override val serializers = Vector(
+    JsonSerializer[ReservedPermits],
+    JsonSerializer[UsedPermit],
+    JsonSerializer[SyncPermitsCommand],
+    JsonSerializer[ReservedPermitsReply],
+  )
 }

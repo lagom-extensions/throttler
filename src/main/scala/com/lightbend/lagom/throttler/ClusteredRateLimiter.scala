@@ -5,7 +5,6 @@ import java.util.concurrent.atomic.AtomicReference
 
 import akka.actor.{Actor, ActorRef, ActorSystem, PoisonPill, Props}
 import akka.cluster.singleton.{ClusterSingletonManager, ClusterSingletonManagerSettings}
-import akka.util.Timeout
 import com.lightbend.lagom.scaladsl.playjson.{JsonSerializer, JsonSerializerRegistry}
 import com.lightbend.lagom.throttler.ClusterInMemoryRateLimiterSemaphore.{ReservedPermitsReply, SyncPermitsCommand}
 import play.api.libs.json.{Format, Json}
@@ -23,7 +22,6 @@ class ClusteredRateLimiter(
 )(implicit ec: ExecutionContext, actorSystem: ActorSystem) {
   private val queue = new ConcurrentLinkedQueue[() => Any]()
   private val syncDuration = duration / syncsPerDuration.toLong
-  implicit private val timeout: Timeout = Timeout(syncDuration / 2)
   private val delegateSyncActor = actorSystem.actorOf(Props(new DelegateSyncActor()))
 
   private val reservedPermits: AtomicReference[ReservedPermits] = new AtomicReference[ReservedPermits]()
